@@ -23,14 +23,14 @@ struct elfhdr {
 
 // Program section header
 struct proghdr {
-  uint32 type;
-  uint32 flags;
-  uint64 off;
-  uint64 vaddr;
-  uint64 paddr;
-  uint64 filesz;
-  uint64 memsz;
-  uint64 align;
+  uint32 type;  //类型
+  uint32 flags;  //标志
+  uint64 off;   //文件偏移
+  uint64 vaddr;  //虚拟地址
+  uint64 paddr;  //物理地址
+  uint64 filesz;  //文件大小
+  uint64 memsz;  //内存大小
+  uint64 align;  //对齐
 };
 
 // Values for Proghdr type

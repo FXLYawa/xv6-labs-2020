@@ -459,9 +459,9 @@ uvmcopy_kernel(char * name,pagetable_t pagetable, pagetable_t kernel_pagetable, 
 
   for(i = oldsz; i < newsz; i += PGSIZE){
     if((pte = walk(pagetable, i, 0)) == 0)
-      panic("uvmmap_copy: pte should exist");
+      panic("uvmcopy_kernel: pte should exist");
     if((*pte & PTE_V) == 0)
-      panic("uvmmap_copy: page not present");
+      panic("uvmcopy_kernel: page not present");
     pa = PTE2PA(*pte);
 
     flags = PTE_FLAGS(*pte) & (~PTE_U);

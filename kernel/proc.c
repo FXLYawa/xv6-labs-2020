@@ -295,17 +295,15 @@ growproc(int n)
   sz = p->sz;
   uint64 oldsz = sz;
   if(n > 0){
+    if(sz + n >= PLIC)return -1;
     uint64 newsz = uvmalloc(p->pagetable, sz, sz + n);
     if(newsz == 0) return -1;
-    
-    if(uvmcopy_kernel("growproc", p->pagetable, p->kernel_pagetable, sz, sz + n) != 0){
-      uvmdealloc(p->pagetable, newsz, sz);
-      return -1;
-    }
     sz = newsz;
+    uvmcopy_kernel("growproc", p->pagetable, p->kernel_pagetable, PGROUNDUP(oldsz), sz);
+
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
-    uvmunmap(p->kernel_pagetable, oldsz, oldsz + n, 0);
+    uvmunmap(p->kernel_pagetable, PGROUNDUP(sz), (PGROUNDUP(oldsz) - PGROUNDUP(sz)) / PGSIZE, 0);
   }
   p->sz = sz;
   return 0;
@@ -732,7 +730,7 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_src){
-    return copyin_new(p->kernel_pagetable, dst, src, len);
+    return copyin_new(p->pagetable, dst, src, len);
   } else {
     memmove(dst, (char*)src, len);
     return 0;

@@ -241,7 +241,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
-    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);//TODO
   }
 
   return newsz;
@@ -453,28 +453,23 @@ uvmcopy_kernel(char * name,pagetable_t pagetable, pagetable_t kernel_pagetable, 
 {
   //printf("%s: uvmcopy_kernel: oldsz %p newsz %p\n", name, oldsz, newsz);
 
-  if(newsz >= PLIC)return -1;
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
 
-  if(newsz < oldsz) {
-    uvmunmap(kernel_pagetable, newsz, (oldsz - newsz) / PGSIZE, 0);
-    return 0;
-  }
-  oldsz = PGROUNDUP(oldsz);
+  for(i = oldsz; i < newsz; i += PGSIZE){
+    if((pte = walk(pagetable, i, 0)) == 0)
+      panic("uvmmap_copy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmmap_copy: page not present");
+    pa = PTE2PA(*pte);
 
-  for(uint64 va = oldsz; va < newsz; va += PGSIZE) {
-    pte_t *pte = walk(pagetable, va, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0)
-      panic("uvmcopy_kernel: page not present");
-
-    uint64 pa = PTE2PA(*pte);
-    int perm = PTE_FLAGS(*pte) & ~PTE_U;
-
-    if(mappages(kernel_pagetable, va, PGSIZE, pa, perm) != 0) {
-      uvmunmap(kernel_pagetable, oldsz, (va - oldsz) / PGSIZE, 0);
+    flags = PTE_FLAGS(*pte) & (~PTE_U);
+    if(mappages(kernel_pagetable, i, PGSIZE, pa, flags) != 0){
+      uvmunmap(kernel_pagetable, 0, i / PGSIZE, 0);
       return -1;
     }
   }
-
   return 0;
 }
 
@@ -499,7 +494,9 @@ vminit(pagetable_t pagetable){
   proc_kvmmap(pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
   // CLINT
-  proc_kvmmap(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  if (pagetable == kernel_pagetable) {
+    proc_kvmmap(pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  }
 
   // PLIC
   proc_kvmmap(pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);

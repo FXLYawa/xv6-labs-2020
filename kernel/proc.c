@@ -34,12 +34,12 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
   kvminithart();
 }
@@ -121,6 +121,30 @@ found:
     return 0;
   }
 
+  p->kernel_pagetable = proc_kernel_pagetable();
+  char *pa = kalloc();
+  if(p->kernel_pagetable == 0 || pa == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // uint64 va = KSTACK((int) (p - proc));
+  // if(proc_kvmmap(p->kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W) < 0){
+  //   kfree(pa);
+  //   freeproc(p);
+  //   release(&p->lock);
+  //   return 0;
+  // }
+  uint64 va = KSTACK((int)0);
+  if(proc_kvmmap(p->kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W) !=0){
+    kfree((void*)pa);
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  p->kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -128,6 +152,24 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
+}
+
+void
+freeproc_kernel(pagetable_t pagetable)
+{
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      uint64 ptepa = PTE2PA(pte);
+      for(int j = 0; j < 512; j++){
+        pte_t pte_0 = ((pagetable_t)ptepa)[j];
+        if((pte_0 & PTE_V) && (pte_0 & (PTE_R|PTE_W|PTE_X)) == 0)
+          kfree((void*)PTE2PA(pte_0));
+      }
+      kfree((void*)ptepa);
+    }
+  }
+  kfree(pagetable);
 }
 
 // free a proc structure and the data hanging from it,
@@ -142,6 +184,13 @@ freeproc(struct proc *p)
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+
+  kfree((void*)kvmpa(p->kernel_pagetable, p->kstack));
+  if(p->kernel_pagetable)
+    freeproc_kernel(p->kernel_pagetable);
+  p->kernel_pagetable = 0;
+  p->kstack = 0;
+
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -221,6 +270,8 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  uvmcopy_kernel("userinit", p->pagetable, p->kernel_pagetable, 0, PGSIZE);
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -242,12 +293,19 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+  uint64 oldsz = sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    uint64 newsz = uvmalloc(p->pagetable, sz, sz + n);
+    if(newsz == 0) return -1;
+    
+    if(uvmcopy_kernel("growproc", p->pagetable, p->kernel_pagetable, sz, sz + n) != 0){
+      uvmdealloc(p->pagetable, newsz, sz);
       return -1;
     }
+    sz = newsz;
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    uvmunmap(p->kernel_pagetable, oldsz, oldsz + n, 0);
   }
   p->sz = sz;
   return 0;
@@ -273,6 +331,13 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
+  if(uvmcopy_kernel("fork", np->pagetable, np->kernel_pagetable, 0, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -473,8 +538,13 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
+
         swtch(&c->context, &p->context);
 
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -662,7 +732,7 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
   struct proc *p = myproc();
   if(user_src){
-    return copyin(p->pagetable, dst, src, len);
+    return copyin_new(p->kernel_pagetable, dst, src, len);
   } else {
     memmove(dst, (char*)src, len);
     return 0;

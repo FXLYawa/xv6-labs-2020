@@ -44,6 +44,10 @@ sys_sbrk(void)
   int addr;
   int n;
 
+  //TODO
+  struct proc *p = myproc();
+  printf("sys_sbrk: pid=%d, name=%s, n=%d, current_sz=%d\n", p->pid, p->name, n, p->sz);  
+
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;

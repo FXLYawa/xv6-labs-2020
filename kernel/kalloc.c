@@ -23,10 +23,16 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct {
+  struct spinlock lock;
+  int quote[PHYSTOP / PGSIZE];
+} page_quo;
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&page_quo.lock, "page_quo");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -51,15 +57,19 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  acquire(&page_quo.lock);
+  if(--page_quo.quote[PA2IDX(pa)] <= 0){
   // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+    memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+    r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    release(&kmem.lock);
+  }
+  release(&page_quo.lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -76,7 +86,43 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+    //TODO: problem
+    // acquire(&page_quo.lock);
+    page_quo.quote[PA2IDX(r)] = 1;
+    // release(&page_quo.lock);
+  }
   return (void*)r;
+}
+
+void *
+kpageclone(void *pa)
+{
+  acquire(&page_quo.lock);
+
+  if(page_quo.quote[PA2IDX(pa)] <= 1){
+    release(&page_quo.lock);
+    return pa;
+  }
+
+  uint64 newpa = (uint64)kalloc();
+  if(newpa == 0){
+    release(&page_quo.lock);
+    return 0;
+  }
+
+  memmove((void*)newpa, (void*)pa, PGSIZE);
+
+  page_quo.quote[PA2IDX(pa)]--;
+
+  release(&page_quo.lock);
+  return (void*)newpa;
+}
+
+void kquoadd(void *pa)
+{
+  acquire(&page_quo.lock);
+  page_quo.quote[PA2IDX(pa)]++;
+  release(&page_quo.lock);
 }

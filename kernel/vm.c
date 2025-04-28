@@ -104,8 +104,8 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0 || (*pte & PTE_V) == 0 || va >= p->sz || va < p->trapframe->sp)
-    if (uvmalloc(p->pagetable, PGROUNDDOWN(va), PGROUNDDOWN(va) + PGSIZE) == 0)
+  if(pte == 0 || (*pte & PTE_V) == 0)
+    if (va >= p->sz || va < p->trapframe->sp || uvmalloc(p->pagetable, PGROUNDDOWN(va), PGROUNDDOWN(va) + PGSIZE) == 0)
       return 0; 
     
   if(pte == 0)

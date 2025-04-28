@@ -108,7 +108,7 @@ sys_sigalarm(void)
     return -1;
   p->alarmInterval = interval;
   p->handler = (void(*)())handler;
-  p->ticksCount = p->onAlarm = 0;
+  p->onAlarm = 0;
   return 0;
 }
 

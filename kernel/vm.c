@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -96,11 +98,16 @@ walkaddr(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
   uint64 pa;
+  struct proc *p = myproc();
 
   if(va >= MAXVA)
     return 0;
 
   pte = walk(pagetable, va, 0);
+  if(pte == 0 || (*pte & PTE_V) == 0 || va >= p->sz || va < p->trapframe->sp)
+    if (uvmalloc(p->pagetable, PGROUNDDOWN(va), PGROUNDDOWN(va) + PGSIZE) == 0)
+      return 0; 
+    
   if(pte == 0)
     return 0;
   if((*pte & PTE_V) == 0)
@@ -317,9 +324,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      // panic("uvmcopy: pte should exist");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      // panic("uvmcopy: page not present");
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -386,8 +395,10 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    if(pa0 == 0){
+      printf("copyin: pa0 == 0\n");
       return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;

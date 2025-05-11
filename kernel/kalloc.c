@@ -21,12 +21,14 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+} kmem[NPROC];
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  // initlock(&kmem.lock, "kmem");
+  for(int i = 0; i < NPROC; i++)
+    initlock(&kmem[i].lock, "kmem");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -56,10 +58,16 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  int id = cpuid();
+
+  acquire(&kmem[id].lock);
+  r->next = kmem[id].freelist;
+  kmem[id].freelist = r;
+  release(&kmem[id].lock);
+  // acquire(&kmem.lock);
+  // r->next = kmem.freelist;
+  // kmem.freelist = r;
+  // release(&kmem.lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,13 +78,74 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  // acquire(&kmem.lock);
+  // r = kmem.freelist;
+  // if(r)
+  //   kmem.freelist = r->next;
+  // release(&kmem.lock);
+
+  int id = cpuid();
+  acquire(&kmem[id].lock);
+  r = kmem[id].freelist;
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+    kmem[id].freelist = r->next;
+  else
+    r = steal(id);
+  release(&kmem[id].lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+// struct run *
+// steal(int id)
+// {
+//   struct run *r = 0;
+//   for (int i = 0; i < NPROC; i++) {
+//     if (i == id) continue;
+//     acquire(&kmem[i].lock);
+//     r = kmem[i].freelist;
+//     if (r) {
+//       kmem[i].freelist = r->next;
+//       release(&kmem[i].lock);
+//       break;
+//     }
+//     release(&kmem[i].lock);
+//   }
+//   return r;
+// }
+
+
+struct run *
+steal(int id)
+{
+  struct run *r = 0;
+  if (id != cpuid()) panic("steal");
+  
+  for (int i = 0; i < NPROC; i++) {
+    if (i == id) continue;
+    acquire(&kmem[i].lock);
+    if(kmem[i].freelist) {
+      struct run *slow, *fast;
+      r = slow = fast = kmem[i].freelist;
+      
+      while(fast) {
+        fast = fast->next;
+        if (fast) {
+          fast = fast->next;
+          slow = slow->next;
+        }
+      }
+
+      kmem[i].freelist = slow->next;
+      slow->next = 0;
+      release(&kmem[i].lock);
+      kmem[id].freelist = r->next;
+      break;
+    }
+    release(&kmem[i].lock);
+  }
+
+  return r;
 }

@@ -439,8 +439,8 @@ void
 itrunc(struct inode *ip)
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
+  struct buf *bp, *bp2;
+  uint *a, *a2;
 
   // 释放直接块的映射
   for(i = 0; i < NDIRECT; i++){
@@ -469,12 +469,13 @@ itrunc(struct inode *ip)
     a = (uint*)bp->data;
     for(i = 0; i < NINDIRECT; i++){
       if(a[i]){
-        struct buf *bp2 = bread(ip->dev, a[i]);
-        uint *a2 = (uint*)bp2->data;
+        bp2 = bread(ip->dev, a[i]);
+        a2 = (uint*)bp2->data;
         for(j = 0; j < NINDIRECT; j++)
           if(a2[j])bfree(ip->dev, a2[j]);
         brelse(bp2);
         bfree(ip->dev, a[i]);
+        ip->addrs[NDIRECT+1] = 0;
         a[i] = 0;
       }
     }

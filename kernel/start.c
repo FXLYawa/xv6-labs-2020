@@ -7,6 +7,8 @@
 void main();
 void timerinit();
 
+static void pmpinit();
+
 // entry.S needs one stack per CPU.
 __attribute__ ((aligned (16))) char stack0[4096 * NCPU];
 
@@ -45,10 +47,18 @@ start()
   int id = r_mhartid();
   w_tp(id);
 
+  pmpinit();
+
   // switch to supervisor mode and jump to main().
   asm volatile("mret");
 }
 
+static void
+pmpinit()
+{
+  w_pmpaddr0((~0ULL) >> 10);
+  w_pmpcfg0(PMP_R | PMP_W | PMP_X | PMP_MATCH_NAPOT);
+}
 // set up to receive timer interrupts in machine mode,
 // which arrive at timervec in kernelvec.S,
 // which turns them into software interrupts for
